@@ -1,3 +1,4 @@
+"use client";
 // lib/hashPassword.ts
 export async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();
