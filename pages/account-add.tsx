@@ -1,75 +1,102 @@
-import { useState } from 'react';
+// pages/account-add.tsx
+import { useState } from "react";
+import { useRouter } from "next/router";
+import { db } from "../lib/firebase"; // 既存の firebase 初期化を使う
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { hashPassword } from "../lib/hashPassword";
 
-export default function AccountAdd() {
-  const [name, setName] = useState('');
-  const [employeeId, setEmployeeId] = useState('');
-  const [email, setEmail] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+const AccountAddPage = () => {
+  const [name, setName] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
-  const handleSubmit = async () => {
-    if (!name || !employeeId || !email) {
-      alert('すべての項目を入力してください');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!name || !employeeId || !password) {
+      setError("すべての項目を入力してください。");
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setError("パスワードが一致しません。");
       return;
     }
 
-    setIsSubmitting(true);
-
     try {
-      const res = await fetch('/api/sendPasswordSetupEmail', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name,
-          employeeId,
-          email
-        })
+      setLoading(true);
+
+      const userRef = doc(db, "users", employeeId);
+      const existing = await getDoc(userRef);
+      if (existing.exists()) {
+        setError("この社員番号はすでに登録されています。");
+        setLoading(false);
+        return;
+      }
+
+      const passwordHash = await hashPassword(password);
+
+      await setDoc(userRef, {
+        name,
+        employeeId,
+        passwordHash,
+        createdAt: serverTimestamp(),
       });
 
-      if (res.ok) {
-        alert('メールを送信しました');
-      } else {
-        const errorText = await res.text();
-        console.error('送信エラー:', errorText);
-        alert('送信に失敗しました');
-      }
+      alert("アカウントを登録しました。");
+      router.push("/menu");
     } catch (err) {
-      console.error('送信時の例外:', err);
-      alert('送信時にエラーが発生しました');
+      console.error(err);
+      setError("登録に失敗しました。時間をおいて再度お試しください。");
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ padding: '20px' }}>
-      <h2>📨 アカウント追加</h2>
+    <div className="container">
+      <h1>アカウントの追加</h1>
+      <form onSubmit={handleSubmit}>
+        <div>
+          <label>氏名</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label>社員番号（ログインID）</label>
+          <input
+            value={employeeId}
+            onChange={(e) => setEmployeeId(e.target.value)}
+          />
+        </div>
+        <div>
+          <label>パスワード</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        <div>
+          <label>パスワード（確認）</label>
+          <input
+            type="password"
+            value={passwordConfirm}
+            onChange={(e) => setPasswordConfirm(e.target.value)}
+          />
+        </div>
 
-      <label>氏名：</label><br />
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      /><br /><br />
+        {error && <p style={{ color: "red" }}>{error}</p>}
 
-      <label>社員番号（ログインID）：</label><br />
-      <input
-        type="text"
-        value={employeeId}
-        onChange={(e) => setEmployeeId(e.target.value)}
-      /><br /><br />
-
-      <label>メールアドレス：</label><br />
-      <input
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      /><br /><br />
-
-      <button onClick={handleSubmit} disabled={isSubmitting}>
-        {isSubmitting ? '送信中...' : 'メール送信・認証'}
-      </button>
+        <button type="submit" disabled={loading}>
+          {loading ? "登録中..." : "登録"}
+        </button>
+      </form>
     </div>
   );
-}
+};
+
+export default AccountAddPage;

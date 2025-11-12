@@ -1,40 +1,35 @@
 // hooks/useAuth.ts
-import { useEffect, useState } from 'react';
-import { auth, db } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { useRouter } from 'next/router';
+import { useEffect, useState } from "react";
+
+export type AuthUser = {
+  employeeId: string;
+  name: string;
+};
 
 export function useAuth() {
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [userInfo, setUserInfo] = useState<{ uid: string, name: string, employeeId: string } | null>(null);
-  const router = useRouter();
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        router.push('/login');
-        setUserInfo(null);
-        setLoading(false);
-      } else {
-        const uid = user.uid;
-        const docSnap = await getDoc(doc(db, 'users', uid));
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setUserInfo({
-            uid,
-            name: user.displayName || '',
-            employeeId: data.employeeId || '',
-          });
-        } else {
-          setUserInfo({ uid, name: user.displayName || '', employeeId: '' });
-        }
-        setLoading(false);
+    if (typeof window === "undefined") return;
+
+    const stored = localStorage.getItem("maintenanceAppUser");
+    if (stored) {
+      try {
+        setUser(JSON.parse(stored));
+      } catch {
+        localStorage.removeItem("maintenanceAppUser");
       }
-    });
+    }
+    setLoading(false);
+  }, []);
 
-    return () => unsub();
-  }, [router]);
+  const logout = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("maintenanceAppUser");
+    }
+    setUser(null);
+  };
 
-  return { loading, userInfo };
+  return { user, loading, logout };
 }

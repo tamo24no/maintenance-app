@@ -34,3 +34,7 @@ functions/
 
 # GitHub secret scanning の対象になるJSONファイル
 firebase/serviceAccountKey.json
+
+# .gitignore のどこかに追記
+firebase.zip
+*.zip   # 他のzipも入れたくなければこれも

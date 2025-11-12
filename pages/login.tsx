@@ -1,67 +1,99 @@
-//pages/login.tsx
-import { useState } from 'react';
-import { useRouter } from 'next/router';
+// pages/login.tsx
+import { useState } from "react";
+import { useRouter } from "next/router";
+import { db } from "../lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { hashPassword } from "../lib/hashPassword";
 
-export default function LoginPage() {
-  const [employeeId, setEmployeeId] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+type AuthUser = {
+  employeeId: string;
+  name: string;
+};
+
+const LoginPage = () => {
+  const [employeeId, setEmployeeId] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const handleLogin = async () => {
-    setError('');
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
 
     if (!employeeId || !password) {
-      setError('社員番号とパスワードを入力してください。');
+      setError("IDとパスワードを入力してください。");
       return;
     }
 
     try {
-      const response = await fetch('/api/loginUser', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employeeId, password }),
-      });
+      setLoading(true);
 
-      const data = await response.json();
+      const userRef = doc(db, "users", employeeId);
+      const snap = await getDoc(userRef);
 
-      if (response.ok) {
-        alert('ログイン成功！');
-        router.push('/menu'); // ログイン後に遷移するページ
-      } else {
-        setError(data.message || 'ログインに失敗しました。');
+      if (!snap.exists()) {
+        setError("ユーザーが見つかりません。");
+        setLoading(false);
+        return;
       }
+
+      const data = snap.data();
+      const inputHash = await hashPassword(password);
+
+      if (inputHash !== data.passwordHash) {
+        setError("パスワードが正しくありません。");
+        setLoading(false);
+        return;
+      }
+
+      const user: AuthUser = {
+        employeeId: data.employeeId,
+        name: data.name,
+      };
+
+      // ログイン情報を localStorage に保存
+      if (typeof window !== "undefined") {
+        localStorage.setItem("maintenanceAppUser", JSON.stringify(user));
+      }
+
+      router.push("/menu");
     } catch (err) {
-      console.error('ログインエラー:', err);
-      setError('ログイン中にエラーが発生しました。');
+      console.error(err);
+      setError("ログインに失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ padding: '2rem' }}>
-      <h2>ログイン</h2>
+    <div className="container">
+      <h1>ログイン</h1>
+      <form onSubmit={handleLogin}>
+        <div>
+          <label>社員番号（ID）</label>
+          <input
+            value={employeeId}
+            onChange={(e) => setEmployeeId(e.target.value)}
+          />
+        </div>
+        <div>
+          <label>パスワード</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
 
-      <label>ログインID（社員番号）：</label>
-      <input
-        type="text"
-        value={employeeId}
-        onChange={(e) => setEmployeeId(e.target.value)}
-        style={{ display: 'block', marginBottom: '1rem', width: '100%' }}
-      />
+        {error && <p style={{ color: "red" }}>{error}</p>}
 
-      <label>パスワード：</label>
-      <input
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        style={{ display: 'block', marginBottom: '1rem', width: '100%' }}
-      />
-
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-
-      <button onClick={handleLogin}>ログイン</button>
-
-      <p>アカウントをお持ちでない方は、<a href="/account-add">新規登録</a></p>
+        <button type="submit" disabled={loading}>
+          {loading ? "ログイン中..." : "ログイン"}
+        </button>
+      </form>
     </div>
   );
-}
+};
+
+export default LoginPage;

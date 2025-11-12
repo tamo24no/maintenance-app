@@ -1,7 +1,6 @@
 // lib/firebase.ts
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore'; // ←追加！
+import { getFirestore } from 'firebase/firestore'; // ← FirestoreだけでOK
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -14,5 +13,4 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
-export const auth = getAuth(app);
-export const db = getFirestore(app); // ←追加！
+export const db = getFirestore(app); // ← Firestore のみ export
