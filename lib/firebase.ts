@@ -1,6 +1,10 @@
 // lib/firebase.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,5 +16,14 @@ const firebaseConfig = {
 };
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+// ★ ここがポイント
+// 企業ネットワークや一部のプロキシ環境でもつながりやすい設定
+export const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true, // 自動で long-polling に切り替え
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
+});
+
 export default app;
