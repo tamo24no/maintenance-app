@@ -17,10 +17,9 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// ★ ここがポイント
-// 企業ネットワークや一部のプロキシ環境でもつながりやすい設定
+// ★ ここがポイント（long polling 優先）
 export const db = initializeFirestore(app, {
-  experimentalAutoDetectLongPolling: true, // 自動で long-polling に切り替え
+  experimentalAutoDetectLongPolling: true, // ネットワーク環境に応じてlong-pollingを自動選択
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager(),
   }),
