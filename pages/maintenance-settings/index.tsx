@@ -40,11 +40,11 @@ export default function MaintenanceSettings() {
   };
 
   const maintenancePages = [
-    { label: 'Dailyメンテナンス', path: '/maintenance-settings/daily' },
-    { label: 'Weeklyメンテナンス', path: '/maintenance-settings/weekly' },
-    { label: 'Monthlyメンテナンス', path: '/maintenance-settings/monthly' },
-    { label: 'Quarterlyメンテナンス', path: '/maintenance-settings/quarterly' },
-    { label: 'Yearlyメンテナンス', path: '/maintenance-settings/yearly' },
+    { label: '毎日メンテナンス', path: '/maintenance-settings/daily' },
+    { label: '週一メンテナンス', path: '/maintenance-settings/weekly' },
+    { label: '月一メンテナンス', path: '/maintenance-settings/monthly' },
+    { label: '四半期メンテナンス', path: '/maintenance-settings/quarterly' },
+    { label: '年一メンテナンス', path: '/maintenance-settings/yearly' },
   ];
 
   return (

@@ -1,25 +1,45 @@
 // pages/daily.tsx
 import { useEffect, useState } from 'react';
+import type React from 'react';
 import { useRouter } from 'next/router';
 import { db } from '@/lib/firebase';
 import {
   collection,
   getDocs,
   doc,
-  setDoc,
   getDoc,
   query,
   where,
+  writeBatch,      // ★ 追加
 } from 'firebase/firestore';
 
 const Daily = () => {
   const [tasks, setTasks] = useState<any[]>([]);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [userName, setUserName] = useState<string>('');   // ★ ログインユーザー名
   const router = useRouter();
 
   const days = ['月', '火', '水', '木', '金', '土', '日', '未選択'];
 
   useEffect(() => {
+    // ★ ログインユーザーを localStorage から取得
+    const stored = typeof window !== 'undefined'
+      ? localStorage.getItem('maintenanceAppUser')
+      : null;
+
+    if (stored) {
+      try {
+        const user = JSON.parse(stored);
+        if (user?.name) {
+          setUserName(user.name);
+        } else if (user?.employeeId) {
+          setUserName(user.employeeId);
+        }
+      } catch {
+        // パース失敗時は何もしない（必要ならコンソールログなど）
+      }
+    }
+
     const fetchData = async () => {
       const q = query(collection(db, 'dailySettings'), where('visible', '==', true));
       const snap = await getDocs(q);
@@ -36,12 +56,11 @@ const Daily = () => {
           };
         })
       );
+
       setTasks(tasksWithLogs);
-      setCheckedIds(
-        tasksWithLogs
-          .filter((task) => task.log && task.user)
-          .map((task) => task.id)
-      );
+
+      // ★ 初期状態ではチェックはすべてオフ（過去ログは表示のみ）
+      setCheckedIds([]);
     };
 
     fetchData();
@@ -55,20 +74,30 @@ const Daily = () => {
   };
 
   const handleUpdate = async () => {
-    const now = new Date().toISOString().split('T')[0];
-    const userName = 'ゲストユーザー';
+    if (!userName) {
+      alert('ユーザー情報が取得できませんでした。ログインし直してください。');
+      return;
+    }
 
-    for (const task of tasks) {
-      const logRef = doc(db, 'dailyChecks', `${task.id}`);
-      if (checkedIds.includes(task.id)) {
-        await setDoc(logRef, {
+    const now = new Date().toISOString().split('T')[0];
+
+    // ★ チェックがついているタスクだけログを更新する
+    //    → チェックを外しても過去ログは消えない
+    const batch = writeBatch(db);
+
+    for (const taskId of checkedIds) {
+      const logRef = doc(db, 'dailyChecks', taskId);
+      batch.set(
+        logRef,
+        {
           timestamp: now,
           user: userName,
-        });
-      } else {
-        await setDoc(logRef, {});
-      }
+        },
+        { merge: true } // 既存フィールドがあってもマージ
+      );
     }
+
+    await batch.commit();
 
     alert('更新が完了しました');
     location.reload();
@@ -88,7 +117,7 @@ const Daily = () => {
     border: '1px solid #ccc',
     padding: '18px 8px',
     textAlign: 'center',
-    fontSize: '15px'
+    fontSize: '15px',
   };
 
   const buttonStyle: React.CSSProperties = {
@@ -99,29 +128,55 @@ const Daily = () => {
     borderRadius: '10px',
     fontSize: '16px',
     fontWeight: 'bold',
-    cursor: 'pointer'
+    cursor: 'pointer',
   };
 
   const sortIconStyle: React.CSSProperties = {
     marginLeft: '6px',
     fontSize: '12px',
     color: '#888',
-    cursor: 'pointer'
+    cursor: 'pointer',
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: '30px' }}>
       <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>📅 Dailyメンテナンス</h1>
 
-      <div style={{ flex: 1, overflow: 'hidden', border: '4px solid #063645', borderRadius: '16px', backgroundColor: '#F2F7FA', display: 'flex', flexDirection: 'column', maxHeight: '500px' }}>
+      <div
+        style={{
+          flex: 1,
+          overflow: 'hidden',
+          border: '4px solid #063645',
+          borderRadius: '16px',
+          backgroundColor: '#F2F7FA',
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '500px',
+        }}
+      >
         <div style={{ overflowY: 'auto', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ backgroundColor: '#E0EEF3' }}>
                 <th style={cellStyle}>完了</th>
-                <th style={cellStyle}>メンテナンス項目<span style={sortIconStyle} onClick={() => handleSort('item')}>↓</span></th>
-                <th style={cellStyle}>場所<span style={sortIconStyle} onClick={() => handleSort('place')}>↓</span></th>
-                <th style={cellStyle}>推奨日<span style={sortIconStyle} onClick={() => handleSort('day')}>↓</span></th>
+                <th style={cellStyle}>
+                  メンテナンス項目
+                  <span style={sortIconStyle} onClick={() => handleSort('item')}>
+                    ↓
+                  </span>
+                </th>
+                <th style={cellStyle}>
+                  場所
+                  <span style={sortIconStyle} onClick={() => handleSort('place')}>
+                    ↓
+                  </span>
+                </th>
+                <th style={cellStyle}>
+                  推奨日
+                  <span style={sortIconStyle} onClick={() => handleSort('day')}>
+                    ↓
+                  </span>
+                </th>
                 <th style={cellStyle}>完了ログ</th>
               </tr>
             </thead>
@@ -137,14 +192,23 @@ const Daily = () => {
                   </td>
                   <td style={cellStyle}>
                     {task.fileUrl ? (
-                      <a href={task.fileUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#176B87', fontWeight: 'bold' }}>{task.item}</a>
+                      <a
+                        href={task.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: '#176B87', fontWeight: 'bold' }}
+                      >
+                        {task.item}
+                      </a>
                     ) : (
                       task.item
                     )}
                   </td>
                   <td style={cellStyle}>{task.place}</td>
                   <td style={cellStyle}>{task.day}</td>
-                  <td style={cellStyle}>{task.log && task.user ? `${task.log}・${task.user}` : ''}</td>
+                  <td style={cellStyle}>
+                    {task.log && task.user ? `${task.log}・${task.user}` : ''}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -152,7 +216,15 @@ const Daily = () => {
         </div>
       </div>
 
-      <div style={{ flexShrink: 0, marginTop: '16px', display: 'flex', justifyContent: 'center', gap: '20px' }}>
+      <div
+        style={{
+          flexShrink: 0,
+          marginTop: '16px',
+          display: 'flex',
+          justifyContent: 'center',
+          gap: '20px',
+        }}
+      >
         <button style={buttonStyle} onClick={() => router.push('/menu')}>
           戻る
         </button>

@@ -1,12 +1,14 @@
+// pages/monthly.tsx
 import { useEffect, useState } from 'react';
+import type React from 'react';
 import { useRouter } from 'next/router';
 import { db } from '@/lib/firebase';
 import {
   collection,
   getDocs,
   doc,
-  setDoc,
   getDoc,
+  writeBatch,   // ★ 追加
 } from 'firebase/firestore';
 
 const weekOrder = ['第1', '第2', '第3', '第4', '第5', '未選択'];
@@ -16,15 +18,35 @@ const Monthly = () => {
   const [tasks, setTasks] = useState<any[]>([]);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string>('');   // ★ ログインユーザー名
   const router = useRouter();
 
   useEffect(() => {
+    // ★ localStorage からログインユーザー取得
+    const stored =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('maintenanceAppUser')
+        : null;
+
+    if (stored) {
+      try {
+        const user = JSON.parse(stored);
+        if (user?.name) {
+          setUserName(user.name);
+        } else if (user?.employeeId) {
+          setUserName(user.employeeId);
+        }
+      } catch {
+        // パース失敗時は無視
+      }
+    }
+
     const fetchData = async () => {
       const snap = await getDocs(collection(db, 'monthlySettings'));
       const tasksWithLogs = await Promise.all(
         snap.docs.map(async (docSnap) => {
           const task = { id: docSnap.id, ...docSnap.data() };
-          const logRef = doc(db, 'monthlyChecks', task.id); // UIDなし
+          const logRef = doc(db, 'monthlyChecks', task.id);
           const logSnap = await getDoc(logRef);
           const logData = logSnap.exists() ? logSnap.data() : null;
           return {
@@ -35,11 +57,9 @@ const Monthly = () => {
         })
       );
       setTasks(tasksWithLogs);
-      setCheckedIds(
-        tasksWithLogs
-          .filter((task) => task.log && task.user)
-          .map((task) => task.id)
-      );
+
+      // ★ 初期状態ではチェックはすべて OFF（過去ログは表示だけ）
+      setCheckedIds([]);
     };
 
     fetchData();
@@ -54,17 +74,29 @@ const Monthly = () => {
   };
 
   const handleUpdate = async () => {
-    const now = new Date().toISOString().split('T')[0];
-    const userName = 'ゲストユーザー';
-
-    for (const task of tasks) {
-      const logRef = doc(db, 'monthlyChecks', task.id);
-      if (checkedIds.includes(task.id)) {
-        await setDoc(logRef, { timestamp: now, user: userName });
-      } else {
-        await setDoc(logRef, {});
-      }
+    if (!userName) {
+      alert('ユーザー情報が取得できませんでした。ログインし直してください。');
+      return;
     }
+
+    const now = new Date().toISOString().split('T')[0];
+
+    // ★ チェックされているタスクだけ更新（未チェックは何もしない）
+    const batch = writeBatch(db);
+
+    for (const taskId of checkedIds) {
+      const logRef = doc(db, 'monthlyChecks', taskId);
+      batch.set(
+        logRef,
+        {
+          timestamp: now,
+          user: userName,
+        },
+        { merge: true } // 既存ログがあってもマージして上書き
+      );
+    }
+
+    await batch.commit();
 
     alert('更新が完了しました');
     location.reload();
@@ -80,7 +112,7 @@ const Monthly = () => {
       } else if (key === 'day') {
         return dayOrder.indexOf(aVal) - dayOrder.indexOf(bVal);
       } else {
-        return (aVal as string).localeCompare(bVal);
+        return (aVal as string).localeCompare(bVal as string);
       }
     });
 
@@ -117,31 +149,58 @@ const Monthly = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: '30px' }}>
       <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>🗓️ Monthlyメンテナンス</h1>
 
-      <div style={{
-        flex: 1,
-        overflow: 'hidden',
-        border: '4px solid #063645',
-        borderRadius: '16px',
-        backgroundColor: '#F2F7FA',
-        display: 'flex',
-        flexDirection: 'column',
-        maxHeight: '400px'
-      }}>
+      <div
+        style={{
+          flex: 1,
+          overflow: 'hidden',
+          border: '4px solid #063645',
+          borderRadius: '16px',
+          backgroundColor: '#F2F7FA',
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '400px',
+        }}
+      >
         <div style={{ overflowY: 'auto', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ backgroundColor: '#E0EEF3' }}>
                 <th style={cellStyle}>完了</th>
-                <th style={cellStyle}>メンテナンス項目<span style={sortIconStyle} onClick={() => handleSort('item')}>↓</span></th>
-                <th style={cellStyle}>場所<span style={sortIconStyle} onClick={() => handleSort('place')}>↓</span></th>
-                <th style={cellStyle}>推奨週<span style={sortIconStyle} onClick={() => handleSort('week')}>↓</span></th>
-                <th style={cellStyle}>推奨日<span style={sortIconStyle} onClick={() => handleSort('day')}>↓</span></th>
+                <th style={cellStyle}>
+                  メンテナンス項目
+                  <span style={sortIconStyle} onClick={() => handleSort('item')}>
+                    ↓
+                  </span>
+                </th>
+                <th style={cellStyle}>
+                  場所
+                  <span style={sortIconStyle} onClick={() => handleSort('place')}>
+                    ↓
+                  </span>
+                </th>
+                <th style={cellStyle}>
+                  推奨週
+                  <span style={sortIconStyle} onClick={() => handleSort('week')}>
+                    ↓
+                  </span>
+                </th>
+                <th style={cellStyle}>
+                  推奨日
+                  <span style={sortIconStyle} onClick={() => handleSort('day')}>
+                    ↓
+                  </span>
+                </th>
                 <th style={cellStyle}>完了ログ</th>
               </tr>
             </thead>
             <tbody>
               {tasks.map((task, index) => (
-                <tr key={task.id} style={{ backgroundColor: index % 2 === 0 ? '#D6EAF3' : '#fff' }}>
+                <tr
+                  key={task.id}
+                  style={{
+                    backgroundColor: index % 2 === 0 ? '#D6EAF3' : '#fff',
+                  }}
+                >
                   <td style={cellStyle}>
                     <input
                       type="checkbox"
@@ -151,8 +210,16 @@ const Monthly = () => {
                   </td>
                   <td style={cellStyle}>
                     {task.fileUrl ? (
-                      <a href={task.fileUrl} target="_blank" rel="noopener noreferrer">{task.item}</a>
-                    ) : task.item}
+                      <a
+                        href={task.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {task.item}
+                      </a>
+                    ) : (
+                      task.item
+                    )}
                   </td>
                   <td style={cellStyle}>{task.place}</td>
                   <td style={cellStyle}>{task.week || '未選択'}</td>
@@ -167,9 +234,21 @@ const Monthly = () => {
         </div>
       </div>
 
-      <div style={{ flexShrink: 0, marginTop: '16px', display: 'flex', justifyContent: 'center', gap: '20px' }}>
-        <button style={buttonStyle} onClick={() => router.push('/menu')}>戻る</button>
-        <button style={buttonStyle} onClick={handleUpdate}>更新</button>
+      <div
+        style={{
+          flexShrink: 0,
+          marginTop: '16px',
+          display: 'flex',
+          justifyContent: 'center',
+          gap: '20px',
+        }}
+      >
+        <button style={buttonStyle} onClick={() => router.push('/menu')}>
+          戻る
+        </button>
+        <button style={buttonStyle} onClick={handleUpdate}>
+          更新
+        </button>
       </div>
     </div>
   );

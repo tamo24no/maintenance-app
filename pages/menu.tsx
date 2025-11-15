@@ -139,7 +139,7 @@ export default function Menu() {
             }}
             onClick={() => router.push("/daily")}
           >
-            Dailyメンテナンス
+            毎日メンテナンス
           </button>
           <button
             style={{
@@ -149,7 +149,7 @@ export default function Menu() {
             }}
             onClick={() => router.push("/weekly")}
           >
-            Weeklyメンテナンス
+            週一メンテナンス
           </button>
           <button
             style={{
@@ -159,7 +159,7 @@ export default function Menu() {
             }}
             onClick={() => router.push("/monthly")}
           >
-            Monthlyメンテナンス
+            月一メンテナンス
           </button>
           <button
             style={{
@@ -169,7 +169,7 @@ export default function Menu() {
             }}
             onClick={() => router.push("/quarterly")}
           >
-            Quarterlyメンテナンス
+            四半期メンテナンス
           </button>
           <button
             style={{
@@ -179,7 +179,7 @@ export default function Menu() {
             }}
             onClick={() => router.push("/yearly")}
           >
-            Yearlyメンテナンス
+            年一メンテナンス
           </button>
         </div>
 

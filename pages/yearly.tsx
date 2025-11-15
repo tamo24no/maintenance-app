@@ -1,25 +1,48 @@
 // pages/yearly.tsx
-
 import { useEffect, useState } from 'react';
+import type React from 'react';
 import { useRouter } from 'next/router';
 import { db } from '@/lib/firebase';
 import {
   collection,
   getDocs,
   doc,
-  setDoc,
   getDoc,
+  writeBatch,  // ★ 追加
 } from 'firebase/firestore';
 
-const monthOrder = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月', '未選択'];
+const monthOrder = [
+  '1月', '2月', '3月', '4月', '5月', '6月',
+  '7月', '8月', '9月', '10月', '11月', '12月', '未選択'
+];
 
 const Yearly = () => {
   const [tasks, setTasks] = useState<any[]>([]);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string>('');   // ★ ログインユーザー名
   const router = useRouter();
 
   useEffect(() => {
+    // ★ ログインユーザー情報を localStorage から取得
+    const stored =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('maintenanceAppUser')
+        : null;
+
+    if (stored) {
+      try {
+        const user = JSON.parse(stored);
+        if (user?.name) {
+          setUserName(user.name);
+        } else if (user?.employeeId) {
+          setUserName(user.employeeId);
+        }
+      } catch {
+        // パース失敗時は無視
+      }
+    }
+
     const fetchData = async () => {
       const snap = await getDocs(collection(db, 'yearlySettings'));
       const tasksWithLogs = await Promise.all(
@@ -36,10 +59,11 @@ const Yearly = () => {
         })
       );
       setTasks(tasksWithLogs);
-      setCheckedIds(
-        tasksWithLogs.filter((task) => task.log && task.user).map((task) => task.id)
-      );
+
+      // ★ 初期状態ではチェックはすべて OFF（過去ログは表示のみ）
+      setCheckedIds([]);
     };
+
     fetchData();
   }, []);
 
@@ -52,17 +76,29 @@ const Yearly = () => {
   };
 
   const handleUpdate = async () => {
-    const now = new Date().toISOString().split('T')[0];
-    const userName = '管理者'; // ログインなしなので固定名に
-
-    for (const task of tasks) {
-      const logRef = doc(db, 'yearlyChecks', task.id);
-      if (checkedIds.includes(task.id)) {
-        await setDoc(logRef, { timestamp: now, user: userName });
-      } else {
-        await setDoc(logRef, {});
-      }
+    if (!userName) {
+      alert('ユーザー情報が取得できませんでした。ログインし直してください。');
+      return;
     }
+
+    const now = new Date().toISOString().split('T')[0];
+
+    // ★ チェックが付いているタスクだけログ更新（過去ログは消さない）
+    const batch = writeBatch(db);
+
+    for (const taskId of checkedIds) {
+      const logRef = doc(db, 'yearlyChecks', taskId);
+      batch.set(
+        logRef,
+        {
+          timestamp: now,
+          user: userName,
+        },
+        { merge: true }  // 既存データとマージ
+      );
+    }
+
+    await batch.commit();
 
     alert('更新が完了しました');
     location.reload();
@@ -75,9 +111,8 @@ const Yearly = () => {
 
       if (key === 'month') {
         return monthOrder.indexOf(aVal) - monthOrder.indexOf(bVal);
-      } else {
-        return (aVal as string).localeCompare(bVal);
       }
+      return (aVal as string).localeCompare(bVal as string);
     });
 
     setTasks(sorted);
@@ -95,7 +130,7 @@ const Yearly = () => {
     padding: '10px 20px',
     backgroundColor: '#145E75',
     color: 'white',
-    border: '3px solid #063645',
+    border:'3px solid #0o63645',
     borderRadius: '10px',
     fontSize: '16px',
     fontWeight: 'bold',
@@ -113,16 +148,18 @@ const Yearly = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: '30px' }}>
       <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>📅 Yearlyメンテナンス</h1>
 
-      <div style={{
-        flex: 1,
-        overflow: 'hidden',
-        border: '4px solid #063645',
-        borderRadius: '16px',
-        backgroundColor: '#F2F7FA',
-        display: 'flex',
-        flexDirection: 'column',
-        maxHeight: '400px'
-      }}>
+      <div
+        style={{
+          flex: 1,
+          overflow: 'hidden',
+          border: '4px solid #063645',
+          borderRadius: '16px',
+          backgroundColor: '#F2F7FA',
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '400px',
+        }}
+      >
         <div style={{ overflowY: 'auto', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -145,7 +182,12 @@ const Yearly = () => {
             </thead>
             <tbody>
               {tasks.map((task, index) => (
-                <tr key={task.id} style={{ backgroundColor: index % 2 === 0 ? '#D6EAF3' : '#fff' }}>
+                <tr
+                  key={task.id}
+                  style={{
+                    backgroundColor: index % 2 === 0 ? '#D6EAF3' : '#fff',
+                  }}
+                >
                   <td style={cellStyle}>
                     <input
                       type="checkbox"
@@ -155,8 +197,16 @@ const Yearly = () => {
                   </td>
                   <td style={cellStyle}>
                     {task.fileUrl ? (
-                      <a href={task.fileUrl} target="_blank" rel="noopener noreferrer">{task.item}</a>
-                    ) : task.item}
+                      <a
+                        href={task.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {task.item}
+                      </a>
+                    ) : (
+                      task.item
+                    )}
                   </td>
                   <td style={cellStyle}>{task.place}</td>
                   <td style={cellStyle}>{task.month || '未選択'}</td>
@@ -170,9 +220,21 @@ const Yearly = () => {
         </div>
       </div>
 
-      <div style={{ flexShrink: 0, marginTop: '16px', display: 'flex', justifyContent: 'center', gap: '20px' }}>
-        <button style={buttonStyle} onClick={() => router.push('/menu')}>戻る</button>
-        <button style={buttonStyle} onClick={handleUpdate}>更新</button>
+      <div
+        style={{
+          flexShrink: 0,
+          marginTop: '16px',
+          display: 'flex',
+          justifyContent: 'center',
+          gap: '20px',
+        }}
+      >
+        <button style={buttonStyle} onClick={() => router.push('/menu')}>
+          戻る
+        </button>
+        <button style={buttonStyle} onClick={handleUpdate}>
+          更新
+        </button>
       </div>
     </div>
   );
