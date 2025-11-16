@@ -22,7 +22,6 @@ const PasswordChangePage: React.FC = () => {
 
     const stored = localStorage.getItem('maintenanceAppUser');
     if (!stored) {
-      // 未ログインならログイン画面へ
       router.replace('/login');
       return;
     }
@@ -45,16 +44,15 @@ const PasswordChangePage: React.FC = () => {
 
     setError(null);
 
+    // 入力チェック
     if (!currentPassword || !newPassword || !newPasswordConfirm) {
       setError('すべての項目を入力してください。');
       return;
     }
-
     if (newPassword !== newPasswordConfirm) {
       setError('新しいパスワードが一致しません。');
       return;
     }
-
     if (newPassword.length < 6) {
       setError('パスワードは6文字以上にしてください。');
       return;
@@ -73,15 +71,18 @@ const PasswordChangePage: React.FC = () => {
 
       const data = snap.data();
 
-      // Firestore に保存されているパスワード（ハッシュ）
-      const storedHash = data.password as string | undefined;
+      // Firestore に保存されているハッシュ値を取得（passwordHash または password）
+      const storedHash =
+        (data.passwordHash as string | undefined) ??
+        (data.password as string | undefined);
+
       if (!storedHash) {
         setError('ユーザー情報にパスワードが登録されていません。');
         setLoading(false);
         return;
       }
 
-      // 入力された「現在のパスワード」をハッシュ化して照合
+      // 入力した現在のパスワードをハッシュ化して比較
       const currentHash = await hashPassword(currentPassword);
       if (storedHash !== currentHash) {
         setError('現在のパスワードが正しくありません。');
@@ -89,9 +90,9 @@ const PasswordChangePage: React.FC = () => {
         return;
       }
 
-      // 新しいパスワードをハッシュ化して保存
+      // 新しいパスワードをハッシュ化して保存（passwordHash に統一）
       const newHash = await hashPassword(newPassword);
-      await updateDoc(userRef, { password: newHash });
+      await updateDoc(userRef, { passwordHash: newHash });
 
       alert('パスワードを変更しました。次回から新しいパスワードでログインしてください。');
       setCurrentPassword('');
@@ -106,7 +107,6 @@ const PasswordChangePage: React.FC = () => {
     }
   };
 
-  // ユーザー情報読み込み中の簡易表示
   if (employeeId === null) {
     return (
       <div style={{ padding: '40px', fontFamily: 'sans-serif' }}>
