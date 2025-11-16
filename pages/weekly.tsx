@@ -10,85 +10,145 @@ import {
   getDoc,
   query,
   where,
-  writeBatch, // ★ 追加
+  writeBatch,
 } from 'firebase/firestore';
 
+type WeeklyTask = {
+  id: string;
+  item: string;
+  place: string;
+  day: string;
+  office?: string;   // 所属箇所（設定画面で保存しているフィールド）
+  fileUrl?: string;
+  log?: string;
+  user?: string;
+};
+
+const days = ['月', '火', '水', '木', '金', '土', '日', '未選択'];
+
 const Weekly = () => {
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [checkedIds, setCheckedIds] = useState<string[]>([]);
-  const [sortKey, setSortKey] = useState<string>('');
-  const [userName, setUserName] = useState<string>(''); // ★ ログインユーザー名
   const router = useRouter();
 
-  const days = ['月', '火', '水', '木', '金', '土', '日', '未選択'];
+  const [allTasks, setAllTasks] = useState<WeeklyTask[]>([]);
+  const [tasks, setTasks] = useState<WeeklyTask[]>([]);
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [userName, setUserName] = useState<string>('');
+  const [userOffice, setUserOffice] = useState<string>('ALL');
+  const [officeFilter, setOfficeFilter] = useState<string>('ALL');
+  const [offices, setOffices] = useState<string[]>([]);
+
+  // 所属箇所フィルタ
+  const filterByOffice = (source: WeeklyTask[], office: string) => {
+    if (office === 'ALL') return source;
+    // 「自箇所 or 共通(ALL) or office未設定」を表示
+    return source.filter(
+      (t) => t.office === office || t.office === 'ALL' || !t.office
+    );
+  };
 
   useEffect(() => {
-    // ★ ログインユーザー情報の取得（Daily と同じ）
-    const stored =
-      typeof window !== 'undefined'
-        ? localStorage.getItem('maintenanceAppUser')
-        : null;
-
-    if (stored) {
-      try {
-        const user = JSON.parse(stored);
-        if (user?.name) {
-          setUserName(user.name);
-        } else if (user?.employeeId) {
-          setUserName(user.employeeId);
-        }
-      } catch {
-        // 失敗時は何もしない
-      }
-    }
-
     const fetchData = async () => {
-      const q = query(
-        collection(db, 'weeklySettings'),
-        where('visible', '==', true)
-      );
-      const snap = await getDocs(q);
-      const tasksWithLogs = await Promise.all(
-        snap.docs.map(async (docSnap) => {
-          const task = { id: docSnap.id, ...docSnap.data() };
+      // --- ログインユーザー情報取得 ---
+      let name = '';
+      let office = 'ALL';
+
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('maintenanceAppUser');
+        if (stored) {
+          try {
+            const user = JSON.parse(stored);
+            if (user?.name) name = user.name;
+            else if (user?.employeeId) name = user.employeeId;
+
+            if (user?.office) office = user.office; // 宮崎工務所 / 南延岡工務室 / ALL など
+          } catch {
+            // 無視
+          }
+        }
+      }
+
+      setUserName(name || 'ゲストユーザー');
+      setUserOffice(office);
+      setOfficeFilter(office);
+
+      // --- weeklySettings & offices をまとめて取得 ---
+      const [settingsSnap, officesSnap] = await Promise.all([
+        getDocs(
+          query(
+            collection(db, 'weeklySettings'),
+            where('visible', '==', true)
+          )
+        ),
+        getDocs(collection(db, 'offices')),
+      ]);
+
+      const all: WeeklyTask[] = await Promise.all(
+        settingsSnap.docs.map(async (docSnap) => {
+          const data = docSnap.data() as any;
+          const task: WeeklyTask = {
+            id: docSnap.id,
+            item: data.item || '',
+            place: data.place || '',
+            day: data.day || '未選択',
+            office: data.office || 'ALL',
+            fileUrl: data.fileUrl,
+          };
+
+          // 完了ログ
           const logRef = doc(db, 'weeklyChecks', task.id);
           const logSnap = await getDoc(logRef);
           const logData = logSnap.exists() ? logSnap.data() : null;
+
           return {
             ...task,
-            log: logData?.timestamp || '',
-            user: logData?.user || '',
+            log: (logData as any)?.timestamp || '',
+            user: (logData as any)?.user || '',
           };
         })
       );
 
-      setTasks(tasksWithLogs);
+      setAllTasks(all);
+      setTasks(filterByOffice(all, office));
+      setCheckedIds([]); // 初期は全て未チェック
 
-      // ★ 初期チェックはすべて OFF（過去ログは表示のみ）
-      setCheckedIds([]);
+      // 所属箇所プルダウン候補
+      const officeNames = officesSnap.docs.map((o) => {
+        const d = o.data() as any;
+        return (d.name as string) || o.id;
+      });
+      officeNames.sort((a, b) => a.localeCompare(b));
+
+      const uniqueOffices = Array.from(new Set(['ALL', ...officeNames]));
+      setOffices(uniqueOffices);
     };
 
     fetchData();
   }, []);
 
+  // チェック操作
   const handleCheck = (taskId: string) => {
-    const newCheckedIds = checkedIds.includes(taskId)
-      ? checkedIds.filter((id) => id !== taskId)
-      : [...checkedIds, taskId];
-    setCheckedIds(newCheckedIds);
+    setCheckedIds((prev) =>
+      prev.includes(taskId)
+        ? prev.filter((id) => id !== taskId)
+        : [...prev, taskId]
+    );
   };
 
+  // 所属箇所フィルタ変更
+  const handleOfficeChange = (office: string) => {
+    setOfficeFilter(office);
+    setTasks(filterByOffice(allTasks, office));
+    setCheckedIds([]); // フィルタ変更時はいったんリセット
+  };
+
+  // 更新（チェックが付いているものだけログ更新）
   const handleUpdate = async () => {
     if (!userName) {
-      alert(
-        'ユーザー情報が取得できませんでした。ログインし直してください。'
-      );
+      alert('ユーザー情報が取得できませんでした。ログインし直してください。');
       return;
     }
 
     const now = new Date().toISOString().split('T')[0];
-
-    // ★ Weekly も Daily と同様に、チェックが付いているものだけ更新
     const batch = writeBatch(db);
 
     for (const taskId of checkedIds) {
@@ -99,7 +159,7 @@ const Weekly = () => {
           timestamp: now,
           user: userName,
         },
-        { merge: true } // 既存ログがあってもマージして上書き
+        { merge: true }
       );
     }
 
@@ -109,8 +169,9 @@ const Weekly = () => {
     location.reload();
   };
 
+  // ソート
   const handleSort = (key: string) => {
-    const sorted = [...tasks].sort((a, b) => {
+    const sorted = [...tasks].sort((a: any, b: any) => {
       if (key === 'day') {
         return (
           days.indexOf(a[key] || '未選択') -
@@ -120,7 +181,6 @@ const Weekly = () => {
       return (a[key] || '').localeCompare(b[key] || '');
     });
     setTasks(sorted);
-    setSortKey(key);
   };
 
   const cellStyle: React.CSSProperties = {
@@ -157,10 +217,38 @@ const Weekly = () => {
         padding: '30px',
       }}
     >
-      <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>
-        📅 Weeklyメンテナンス
-      </h1>
+      {/* タイトル + 所属箇所プルダウン */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '12px',
+        }}
+      >
+        <h1 style={{ fontSize: '24px' }}>
+          📅 Weeklyメンテナンス（{officeFilter}）
+        </h1>
 
+        <div>
+          <label style={{ marginRight: '8px', fontWeight: 'bold' }}>
+            表示箇所
+          </label>
+          <select
+            value={officeFilter}
+            onChange={(e) => handleOfficeChange(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: '14px' }}
+          >
+            {offices.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* テーブル本体 */}
       <div
         style={{
           flex: 1,
@@ -213,8 +301,7 @@ const Weekly = () => {
                 <tr
                   key={task.id}
                   style={{
-                    backgroundColor:
-                      index % 2 === 0 ? '#D6EAF3' : '#fff',
+                    backgroundColor: index % 2 === 0 ? '#D6EAF3' : '#fff',
                   }}
                 >
                   <td style={cellStyle}>
@@ -230,10 +317,7 @@ const Weekly = () => {
                         href={task.fileUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        style={{
-                          color: '#176B87',
-                          fontWeight: 'bold',
-                        }}
+                        style={{ color: '#176B87', fontWeight: 'bold' }}
                       >
                         {task.item}
                       </a>
@@ -244,9 +328,7 @@ const Weekly = () => {
                   <td style={cellStyle}>{task.place}</td>
                   <td style={cellStyle}>{task.day}</td>
                   <td style={cellStyle}>
-                    {task.log && task.user
-                      ? `${task.log}・${task.user}`
-                      : ''}
+                    {task.log && task.user ? `${task.log}・${task.user}` : ''}
                   </td>
                 </tr>
               ))}
@@ -255,6 +337,7 @@ const Weekly = () => {
         </div>
       </div>
 
+      {/* ボタン */}
       <div
         style={{
           flexShrink: 0,

@@ -51,6 +51,14 @@ const OtherSettings: React.FC = () => {
       >
         パスワード変更
       </button>
+
+      <button
+        style={{ ...buttonStyle, backgroundColor: '#145E75', color: 'white' }}
+        onClick={() => router.push('/office-settings')}
+      >
+        所属箇所の設定
+      </button>
+
     </div>
   );
 };

@@ -8,65 +8,129 @@ import {
   getDocs,
   doc,
   getDoc,
-  writeBatch,  // ★ 追加
+  writeBatch,
 } from 'firebase/firestore';
 
 const monthOrder = [
-  '1月', '2月', '3月', '4月', '5月', '6月',
-  '7月', '8月', '9月', '10月', '11月', '12月', '未選択'
+  '1月',
+  '2月',
+  '3月',
+  '4月',
+  '5月',
+  '6月',
+  '7月',
+  '8月',
+  '9月',
+  '10月',
+  '11月',
+  '12月',
+  '未選択',
 ];
 
+type YearlyTask = {
+  id: string;
+  item: string;
+  place: string;
+  month: string;
+  office?: string; // 所属箇所（設定画面で追加したもの）
+  fileUrl?: string;
+  log?: string;
+  user?: string;
+};
+
 const Yearly = () => {
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [checkedIds, setCheckedIds] = useState<string[]>([]);
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string>('');   // ★ ログインユーザー名
   const router = useRouter();
 
+  const [allTasks, setAllTasks] = useState<YearlyTask[]>([]);
+  const [tasks, setTasks] = useState<YearlyTask[]>([]);
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [userName, setUserName] = useState<string>('');
+  const [userOffice, setUserOffice] = useState<string>('ALL');
+  const [officeFilter, setOfficeFilter] = useState<string>('ALL');
+  const [offices, setOffices] = useState<string[]>([]);
+
+  // 所属箇所でフィルタ
+  const filterByOffice = (source: YearlyTask[], office: string) => {
+    if (office === 'ALL') return source;
+    return source.filter(
+      (t) => t.office === office || t.office === 'ALL' || !t.office
+    );
+  };
+
   useEffect(() => {
-    // ★ ログインユーザー情報を localStorage から取得
-    const stored =
-      typeof window !== 'undefined'
-        ? localStorage.getItem('maintenanceAppUser')
-        : null;
-
-    if (stored) {
-      try {
-        const user = JSON.parse(stored);
-        if (user?.name) {
-          setUserName(user.name);
-        } else if (user?.employeeId) {
-          setUserName(user.employeeId);
-        }
-      } catch {
-        // パース失敗時は無視
-      }
-    }
-
     const fetchData = async () => {
-      const snap = await getDocs(collection(db, 'yearlySettings'));
-      const tasksWithLogs = await Promise.all(
-        snap.docs.map(async (docSnap) => {
-          const task = { id: docSnap.id, ...docSnap.data() };
+      // --- ログインユーザー情報取得 ---
+      let name = '';
+      let office = 'ALL';
+
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('maintenanceAppUser');
+        if (stored) {
+          try {
+            const user = JSON.parse(stored);
+            if (user?.name) name = user.name;
+            else if (user?.employeeId) name = user.employeeId;
+
+            if (user?.office) office = user.office; // 宮崎工務所 / 南延岡工務室 / ALL など
+          } catch {
+            // 失敗時はデフォルトのまま
+          }
+        }
+      }
+
+      setUserName(name || 'ゲストユーザー');
+      setUserOffice(office);
+      setOfficeFilter(office);
+
+      // --- Yearly設定 & 所属箇所マスタをまとめて取得 ---
+      const [settingsSnap, officesSnap] = await Promise.all([
+        getDocs(collection(db, 'yearlySettings')),
+        getDocs(collection(db, 'offices')),
+      ]);
+
+      const all: YearlyTask[] = await Promise.all(
+        settingsSnap.docs.map(async (docSnap) => {
+          const data = docSnap.data() as any;
+          const task: YearlyTask = {
+            id: docSnap.id,
+            item: data.item || '',
+            place: data.place || '',
+            month: data.month || '未選択',
+            office: data.office || 'ALL',
+          };
+
+          // 完了ログ
           const logRef = doc(db, 'yearlyChecks', task.id);
           const logSnap = await getDoc(logRef);
           const logData = logSnap.exists() ? logSnap.data() : null;
+
           return {
             ...task,
-            log: logData?.timestamp || '',
-            user: logData?.user || '',
+            log: (logData as any)?.timestamp || '',
+            user: (logData as any)?.user || '',
           };
         })
       );
-      setTasks(tasksWithLogs);
 
-      // ★ 初期状態ではチェックはすべて OFF（過去ログは表示のみ）
-      setCheckedIds([]);
+      setAllTasks(all);
+      setTasks(filterByOffice(all, office));
+      setCheckedIds([]); // 初期はすべて未チェック
+
+      // 所属箇所プルダウン用
+      const officeNames = officesSnap.docs.map((o) => {
+        const d = o.data() as any;
+        return (d.name as string) || o.id;
+      });
+      officeNames.sort((a, b) => a.localeCompare(b));
+      // ALL も選択肢に含める
+      const uniqueOffices = Array.from(new Set(['ALL', ...officeNames]));
+      setOffices(uniqueOffices);
     };
 
     fetchData();
   }, []);
 
+  // チェック操作
   const handleCheck = (taskId: string) => {
     setCheckedIds((prev) =>
       prev.includes(taskId)
@@ -75,6 +139,14 @@ const Yearly = () => {
     );
   };
 
+  // 所属箇所フィルタ変更
+  const handleOfficeChange = (office: string) => {
+    setOfficeFilter(office);
+    setTasks(filterByOffice(allTasks, office));
+    setCheckedIds([]); // フィルタ変更時はいったんチェックリセット
+  };
+
+  // 更新（チェック付いているものだけログ更新）
   const handleUpdate = async () => {
     if (!userName) {
       alert('ユーザー情報が取得できませんでした。ログインし直してください。');
@@ -82,8 +154,6 @@ const Yearly = () => {
     }
 
     const now = new Date().toISOString().split('T')[0];
-
-    // ★ チェックが付いているタスクだけログ更新（過去ログは消さない）
     const batch = writeBatch(db);
 
     for (const taskId of checkedIds) {
@@ -94,7 +164,7 @@ const Yearly = () => {
           timestamp: now,
           user: userName,
         },
-        { merge: true }  // 既存データとマージ
+        { merge: true }
       );
     }
 
@@ -104,8 +174,9 @@ const Yearly = () => {
     location.reload();
   };
 
+  // ソート
   const handleSort = (key: string) => {
-    const sorted = [...tasks].sort((a, b) => {
+    const sorted = [...tasks].sort((a: any, b: any) => {
       const aVal = a[key] || '未選択';
       const bVal = b[key] || '未選択';
 
@@ -116,7 +187,6 @@ const Yearly = () => {
     });
 
     setTasks(sorted);
-    setSortKey(key);
   };
 
   const cellStyle: React.CSSProperties = {
@@ -130,7 +200,7 @@ const Yearly = () => {
     padding: '10px 20px',
     backgroundColor: '#145E75',
     color: 'white',
-    border:'3px solid #0o63645',
+    border: '3px solid #063645',
     borderRadius: '10px',
     fontSize: '16px',
     fontWeight: 'bold',
@@ -145,9 +215,46 @@ const Yearly = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: '30px' }}>
-      <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>📅 Yearlyメンテナンス</h1>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        padding: '30px',
+      }}
+    >
+      {/* タイトル + 所属箇所プルダウン */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '12px',
+        }}
+      >
+        <h1 style={{ fontSize: '24px' }}>
+          📅 Yearlyメンテナンス（{officeFilter}）
+        </h1>
 
+        <div>
+          <label style={{ marginRight: '8px', fontWeight: 'bold' }}>
+            表示箇所
+          </label>
+          <select
+            value={officeFilter}
+            onChange={(e) => handleOfficeChange(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: '14px' }}
+          >
+            {offices.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* テーブル本体 */}
       <div
         style={{
           flex: 1,
@@ -167,15 +274,30 @@ const Yearly = () => {
                 <th style={cellStyle}>完了</th>
                 <th style={cellStyle}>
                   メンテナンス項目
-                  <span style={sortIconStyle} onClick={() => handleSort('item')}>↓</span>
+                  <span
+                    style={sortIconStyle}
+                    onClick={() => handleSort('item')}
+                  >
+                    ↓
+                  </span>
                 </th>
                 <th style={cellStyle}>
                   場所
-                  <span style={sortIconStyle} onClick={() => handleSort('place')}>↓</span>
+                  <span
+                    style={sortIconStyle}
+                    onClick={() => handleSort('place')}
+                  >
+                    ↓
+                  </span>
                 </th>
                 <th style={cellStyle}>
                   推奨月
-                  <span style={sortIconStyle} onClick={() => handleSort('month')}>↓</span>
+                  <span
+                    style={sortIconStyle}
+                    onClick={() => handleSort('month')}
+                  >
+                    ↓
+                  </span>
                 </th>
                 <th style={cellStyle}>完了ログ</th>
               </tr>
@@ -220,6 +342,7 @@ const Yearly = () => {
         </div>
       </div>
 
+      {/* ボタン */}
       <div
         style={{
           flexShrink: 0,
